@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Inteligencia Inmobiliaria – Nexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    .sticky-th th { position: sticky; top: 0; background: white; z-index: 10; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl md:text-3xl font-semibold">Inteligencia Inmobiliaria – Nexo</h1>
+      <span id="badge-generated" class="text-sm text-slate-500"></span>
+    </header>
+
+    <!-- KPI Cards -->
+    <section id="kpi-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <div class="text-sm text-slate-500">Unidades totales</div>
+        <div id="kpi-unidades" class="text-3xl font-semibold">–</div>
+      </div>
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <div class="text-sm text-slate-500">Precio promedio</div>
+        <div id="kpi-precio-prom" class="text-3xl font-semibold">–</div>
+      </div>
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <div class="text-sm text-slate-500">Precio mediana</div>
+        <div id="kpi-precio-med" class="text-3xl font-semibold">–</div>
+      </div>
+    </section>
+
+    <!-- Controles -->
+    <section class="rounded-2xl shadow-sm bg-white p-5 space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input id="search" type="search" placeholder="Buscar (inmueble, tipología, estado)…"
+               class="md:col-span-2 rounded-xl border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400" />
+        <select id="filter-proyecto" class="rounded-xl border border-slate-300 px-3 py-2">
+          <option value="">Proyecto: todos</option>
+        </select>
+        <select id="filter-estado" class="rounded-xl border border-slate-300 px-3 py-2">
+          <option value="">Estado: todos</option>
+        </select>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="btn-reset" class="btn rounded-xl px-3 py-2 bg-slate-800 text-white">Limpiar filtros</button>
+        <button id="btn-descargar" class="btn rounded-xl px-3 py-2 border border-slate-300">Descargar CSV</button>
+      </div>
+    </section>
+
+    <!-- CHARTS: KPIs visuales -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold">Unidades por Estado (global)</h2>
+          <span class="text-xs text-slate-500">Interactúa con la leyenda para mostrar/ocultar estados</span>
+        </div>
+        <canvas id="chartEstadosGlobal" height="200"></canvas>
+      </div>
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <h2 class="text-lg font-semibold">Precio promedio por Proyecto</h2>
+        <canvas id="chartPrecioProyecto" height="200"></canvas>
+      </div>
+      <div class="rounded-2xl shadow-sm bg-white p-5 lg:col-span-2">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold">Comparación de Estados por Proyecto (barras apiladas)</h2>
+          <div class="flex items-center gap-3 text-sm">
+            <label class="flex items-center gap-1"><input id="stack-toggle" type="checkbox" checked> Apilar</label>
+            <label class="flex items-center gap-1"><input id="percent-toggle" type="checkbox"> %</label>
+          </div>
+        </div>
+        <canvas id="chartEstadosProyecto" height="280"></canvas>
+      </div>
+      <div class="rounded-2xl shadow-sm bg-white p-5 lg:col-span-2">
+        <h2 class="text-lg font-semibold">Precio vs Área total (dispersión)</h2>
+        <canvas id="chartScatter" height="260"></canvas>
+      </div>
+    </section>
+
+    <!-- Tabla -->
+    <section class="rounded-2xl shadow-sm bg-white p-0 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table id="tabla" class="min-w-full text-sm">
+          <thead class="sticky-th">
+            <tr class="border-b"></tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="flex items-center justify-between p-4 border-t">
+        <div class="text-sm text-slate-500">
+          <span id="page-info">Página 1</span>
+        </div>
+        <div class="flex gap-2">
+          <button id="prev" class="btn rounded-lg px-3 py-1 border border-slate-300">Anterior</button>
+          <button id="next" class="btn rounded-lg px-3 py-1 border border-slate-300">Siguiente</button>
+          <select id="page-size" class="rounded-lg border border-slate-300 px-2 py-1">
+            <option>10</option>
+            <option selected>25</option>
+            <option>50</option>
+            <option>100</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // ------- Utilidades -------
+    const money = (v) => (v === null || v === undefined || isNaN(v)) ? "–" :
+      new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 0 }).format(v);
+    const csvEscape = (s) => `"${String(s ?? "").replaceAll('"','""')}"`;
+    function downloadCSV(rows, headers) {
+      const head = headers.map(csvEscape).join(",");
+      const body = rows.map(r => headers.map(h => csvEscape(r[h])).join(",")).join("\n");
+      const blob = new Blob([head + "\n" + body], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "nexo_unidades.csv"; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ------- Estado global -------
+    let DATA = [];
+    let VIEW = [];
+    let HEADERS = [];
+    let sortKey = null;
+    let sortDir = 1; // 1 asc, -1 desc
+    let page = 1;
+    let pageSize = 25;
+    let proyectos = new Set();
+    let estados = new Set();
+    let KPIS = null;
+
+    // Charts
+    let chartEstadosGlobal, chartPrecioProyecto, chartEstadosProyecto, chartScatter;
+
+    async function fetchJSON(file) {
+      const r = await fetch(file);
+      if (!r.ok) throw new Error(`No se pudo cargar ${file}`);
+      return r.json();
+    }
+
+    async function boot() {
+      const [records, kpis] = await Promise.all([
+        fetchJSON("records.json"),
+        fetchJSON("kpis.json"),
+      ]);
+      KPIS = kpis;
+
+      DATA = records.map(r => ({
+        "Proyecto": r["Proyecto"] ?? "",
+        "Numero de inmueble": r["Numero de inmueble"] ?? "",
+        "Precio de lista": r["Precio de lista"] ?? "",
+        "Precio de lista_num": r["Precio de lista_num"] ?? null,
+        "Estado de inmueble": r["Estado de inmueble"] ?? "",
+        "Tipologia": r["Tipologia"] ?? "",
+        "Area techada": r["Area techada"] ?? "",
+        "Area techada_num": r["Area techada_num"] ?? null,
+        "Area total": r["Area total"] ?? "",
+        "Area total_num": r["Area total_num"] ?? null,
+        "Dormitorios": r["Dormitorios"] ?? "",
+        "Dormitorios_num": r["Dormitorios_num"] ?? null,
+        "Piso": r["Piso"] ?? ""
+      }));
+
+      HEADERS = [
+        "Proyecto", "Numero de inmueble", "Estado de inmueble",
+        "Tipologia", "Dormitorios", "Piso",
+        "Area techada", "Area total",
+        "Precio de lista"
+      ].filter(h => h in DATA[0]);
+
+      DATA.forEach(r => { if (r["Proyecto"]) proyectos.add(r["Proyecto"]); if (r["Estado de inmueble"]) estados.add(r["Estado de inmueble"]); });
+
+      document.querySelector("#kpi-unidades").textContent = (kpis?.cards?.unidades_totales ?? DATA.length).toLocaleString("es-PE");
+      document.querySelector("#kpi-precio-prom").textContent = money(kpis?.cards?.precio_promedio ?? null);
+      document.querySelector("#kpi-precio-med").textContent = money(kpis?.cards?.precio_median ?? null);
+      document.querySelector("#badge-generated").textContent = kpis?.generated_at ? `Generado: ${kpis.generated_at}` : "";
+
+      // Filtros
+      const selP = document.querySelector("#filter-proyecto");
+      const selE = document.querySelector("#filter-estado");
+      [...proyectos].sort().forEach(p=>{ const opt=document.createElement("option"); opt.value=p; opt.textContent=p; selP.appendChild(opt); });
+      [...estados].sort().forEach(e=>{ const opt=document.createElement("option"); opt.value=e; opt.textContent=e; selE.appendChild(opt); });
+
+      attachHandlers();
+      applyFiltersAndRender();
+    }
+
+    function applyFiltersAndRender() {
+      const q = document.querySelector("#search").value.trim().toLowerCase();
+      const fP = document.querySelector("#filter-proyecto").value;
+      const fE = document.querySelector("#filter-estado").value;
+
+      VIEW = DATA.filter(r => {
+        const okP = !fP || r["Proyecto"] === fP;
+        const okE = !fE || r["Estado de inmueble"] === fE;
+        const hayQ = !q || Object.values(r).some(v => String(v ?? "").toLowerCase().includes(q));
+        return okP && okE && hayQ;
+      });
+
+      if (sortKey) {
+        VIEW.sort((a,b)=>{
+          const va = a[sortKey], vb = b[sortKey];
+          const isNum = ["Precio de lista_num", "Area techada_num", "Area total_num", "Dormitorios_num"].some(k => k===sortKey) ||
+                        ["Precio de lista","Area techada","Area total","Dormitorios"].includes(sortKey);
+          if (isNum) {
+            const na = Number(a[sortKey] ?? a[sortKey+"_num"] ?? a[sortKey]) || 0;
+            const nb = Number(b[sortKey] ?? b[sortKey+"_num"] ?? b[sortKey]) || 0;
+            return (na - nb) * sortDir;
+          }
+          return String(va ?? "").localeCompare(String(vb ?? ""), "es", { numeric: true }) * sortDir;
+        });
+      }
+
+      page = 1;
+      renderTable();
+      renderCharts();
+    }
+
+    function renderHeaders() {
+      const tr = document.querySelector("thead tr");
+      tr.innerHTML = "";
+      HEADERS.forEach(h=>{
+        const th = document.createElement("th");
+        th.className = "text-left px-4 py-3 font-medium border-b cursor-pointer select-none";
+        th.textContent = h; th.title = "Ordenar por " + h;
+        th.addEventListener("click", ()=>{ if (sortKey === h) { sortDir = -sortDir; } else { sortKey = h; sortDir = 1; } applyFiltersAndRender(); });
+        tr.appendChild(th);
+      });
+    }
+
+    function renderTable() {
+      renderHeaders();
+      const tbody = document.querySelector("#tbody");
+      tbody.innerHTML = "";
+      const start = (page-1)*pageSize;
+      const end = start + pageSize;
+      const rows = VIEW.slice(start, end);
+
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        tr.className = "border-b hover:bg-slate-50";
+        for (const h of HEADERS) {
+          let val = r[h];
+          if (h === "Precio de lista") val = money(r["Precio de lista_num"]);
+          const td = document.createElement("td");
+          td.className = "px-4 py-2";
+          td.textContent = (val ?? "") === "" ? "–" : val;
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+
+      const info = document.querySelector("#page-info");
+      info.textContent = `Página ${page} • ${Math.min(end, VIEW.length)} de ${VIEW.length} filas`;
+      document.querySelector("#prev").disabled = page <= 1;
+      document.querySelector("#next").disabled = end >= VIEW.length;
+    }
+
+    function attachHandlers() {
+      document.querySelector("#search").addEventListener("input", debounce(applyFiltersAndRender, 200));
+      document.querySelector("#filter-proyecto").addEventListener("change", applyFiltersAndRender);
+      document.querySelector("#filter-estado").addEventListener("change", applyFiltersAndRender);
+      document.querySelector("#btn-reset").addEventListener("click", ()=>{
+        document.querySelector("#search").value = "";
+        document.querySelector("#filter-proyecto").value = "";
+        document.querySelector("#filter-estado").value = "";
+        sortKey = null; sortDir = 1; page = 1; applyFiltersAndRender();
+      });
+      document.querySelector("#prev").addEventListener("click", ()=>{ if (page>1){ page--; renderTable(); } });
+      document.querySelector("#next").addEventListener("click", ()=>{ if ((page*pageSize)<VIEW.length){ page++; renderTable(); } });
+      document.querySelector("#page-size").addEventListener("change", (e)=>{ pageSize = parseInt(e.target.value,10)||25; page=1; renderTable(); });
+      document.querySelector("#btn-descargar").addEventListener("click", ()=>{
+        const headers = HEADERS;
+        const data = VIEW.map(r=>{ const obj={}; headers.forEach(h=>{ obj[h] = (h==="Precio de lista") ? (r["Precio de lista_num"] ?? "") : (r[h] ?? ""); }); return obj; });
+        downloadCSV(data, headers);
+      });
+      document.querySelector("#stack-toggle").addEventListener("change", ()=>renderCharts());
+      document.querySelector("#percent-toggle").addEventListener("change", ()=>renderCharts());
+    }
+
+    function debounce(fn, t=250) { let id; return (...args)=>{ clearTimeout(id); id=setTimeout(()=>fn(...args), t); }; }
+
+    // ---------- CHARTS ----------
+    function groupBy(arr, key) {
+      return arr.reduce((acc, r)=>{ const k=r[key] ?? "__NA__"; (acc[k]||(acc[k]=[])).push(r); return acc; },{});
+    }
+
+    function sum(arr, sel) { let s=0; for(const x of arr) s += sel(x)||0; return s; }
+
+    function buildEstadosGlobalData(rows) {
+      const byE = groupBy(rows, "Estado de inmueble");
+      const labels = Object.keys(byE);
+      const data = labels.map(l => byE[l].length);
+      return { labels, data };
+    }
+
+    function buildPrecioPromedioPorProyecto(rows) {
+      const byP = groupBy(rows, "Proyecto");
+      const labels = Object.keys(byP);
+      const data = labels.map(l => {
+        const arr = byP[l].map(r=> Number(r["Precio de lista_num"]) || 0).filter(v=>v>0);
+        if (!arr.length) return 0;
+        return arr.reduce((a,b)=>a+b,0)/arr.length;
+      });
+      return { labels, data };
+    }
+
+    function buildEstadosPorProyectoStack(rows) {
+      const byP = groupBy(rows, "Proyecto");
+      const proyectos = Object.keys(byP);
+      const estadosSet = new Set();
+      rows.forEach(r=> estadosSet.add(r["Estado de inmueble"] ?? "__NA__"));
+      const estados = Array.from(estadosSet);
+
+      // Serie por cada estado
+      const series = estados.map(est => {
+        const data = proyectos.map(p => byP[p].filter(r => (r["Estado de inmueble"] ?? "__NA__") === est).length);
+        return { label: est, data };
+      });
+      // Totales por proyecto para %
+      const totals = proyectos.map((_, i) => series.reduce((acc, s)=> acc + (s.data[i]||0), 0));
+      return { proyectos, estados, series, totals };
+    }
+
+    function buildScatter(rows) {
+      const pts = rows
+        .filter(r => (r["Area total_num"] ?? 0) > 0 && (r["Precio de lista_num"] ?? 0) > 0)
+        .map(r => ({ x: r["Area total_num"], y: r["Precio de lista_num"], proyecto: r["Proyecto"], estado: r["Estado de inmueble"] }));
+      return pts;
+    }
+
+    function destroyChart(c) { if (c) { c.destroy(); } }
+
+    function renderCharts() {
+      // Estados global
+      const eg = buildEstadosGlobalData(VIEW);
+      destroyChart(chartEstadosGlobal);
+      chartEstadosGlobal = new Chart(document.getElementById('chartEstadosGlobal').getContext('2d'), {
+        type: 'bar',
+        data: { labels: eg.labels, datasets: [{ label: 'Unidades', data: eg.data }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+      });
+
+      // Precio promedio por proyecto
+      const pp = buildPrecioPromedioPorProyecto(VIEW);
+      destroyChart(chartPrecioProyecto);
+      chartPrecioProyecto = new Chart(document.getElementById('chartPrecioProyecto').getContext('2d'), {
+        type: 'bar',
+        data: { labels: pp.labels, datasets: [{ label: 'Precio promedio (PEN)', data: pp.data }] },
+        options: {
+          responsive: true,
+          plugins: { tooltip: { callbacks: { label: (ctx)=> money(ctx.raw) } } },
+          scales: { y: { beginAtZero: true, ticks: { callback: (v)=> money(v) } } }
+        }
+      });
+
+      // Estados por proyecto (stack/percent)
+      const stack = document.querySelector('#stack-toggle').checked;
+      const asPercent = document.querySelector('#percent-toggle').checked;
+      const ep = buildEstadosPorProyectoStack(VIEW);
+      const datasets = ep.series.map((s)=> ({ label: s.label, data: s.data.slice() }));
+      if (asPercent) {
+        datasets.forEach(ds => {
+          ds.data = ds.data.map((v,i)=> ep.totals[i] ? +(100*v/ep.totals[i]).toFixed(2) : 0);
+        });
+      }
+      destroyChart(chartEstadosProyecto);
+      chartEstadosProyecto = new Chart(document.getElementById('chartEstadosProyecto').getContext('2d'), {
+        type: 'bar',
+        data: { labels: ep.proyectos, datasets },
+        options: {
+          responsive: true,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            tooltip: { callbacks: { label: (ctx)=> asPercent ? `${ctx.dataset.label}: ${ctx.raw}%` : `${ctx.dataset.label}: ${ctx.raw}` } },
+            legend: { position: 'top' }
+          },
+          scales: {
+            x: { stacked: stack },
+            y: { stacked: stack, beginAtZero: true, ticks: { callback: (v)=> asPercent ? v+ '%' : v } }
+          }
+        }
+      });
+
+      // Dispersión Precio vs Área total
+      const sc = buildScatter(VIEW);
+      destroyChart(chartScatter);
+      chartScatter = new Chart(document.getElementById('chartScatter').getContext('2d'), {
+        type: 'scatter',
+        data: { datasets: [{ label: 'Unidades', data: sc }] },
+        options: {
+          responsive: true,
+          plugins: { tooltip: { callbacks: { label: (ctx)=> `Área: ${ctx.raw.x} m², Precio: ${money(ctx.raw.y)}\n${ctx.raw.proyecto} – ${ctx.raw.estado}` } } },
+          scales: {
+            x: { title: { display: true, text: 'Área total (m²)' } },
+            y: { title: { display: true, text: 'Precio (PEN)' }, ticks: { callback: (v)=> money(v) } }
+          }
+        }
+      });
+    }
+
+    // Go!
+    boot().catch(err=>{ console.error(err); alert("Error cargando datos: " + err.message); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+{
+  "generated_at": "2025-10-11T13:42:48",
+  "cards": {
+    "unidades_totales": 1220,
+    "precio_promedio": 447488.57,
+    "precio_median": 427982.27
+  },
+  "by_proyecto": {
+    "Alicanto": {
+      "unidades": 87,
+      "precio_promedio": 440558.95,
+      "precio_median": 415756.16,
+      "por_estado": {
+        "Disponible (Visible)": 45,
+        "No Disponible (Vendido)": 33,
+        "Disponible (Oculto)": 9
+      }
+    },
+    "Capadocia": {
+      "unidades": 147,
+      "precio_promedio": 548480.67,
+      "precio_median": 558372.0,
+      "por_estado": {
+        "Disponible (Visible)": 122,
+        "No Disponible (Vendido)": 20,
+        "Disponible (Oculto)": 5
+      }
+    },
+    "Fenix": {
+      "unidades": 83,
+      "precio_promedio": 467820.73,
+      "precio_median": 445005.33,
+      "por_estado": {
+        "No Disponible (Vendido)": 41,
+        "Disponible (Visible)": 40,
+        "Disponible (Oculto)": 2
+      }
+    },
+    "Matera": {
+      "unidades": 189,
+      "precio_promedio": 505584.74,
+      "precio_median": 490115.56,
+      "por_estado": {
+        "Disponible (Visible)": 150,
+        "Disponible (Oculto)": 20,
+        "No Disponible (Vendido)": 19
+      }
+    },
+    "Modena": {
+      "unidades": 200,
+      "precio_promedio": 471448.99,
+      "precio_median": 459627.92,
+      "por_estado": {
+        "Disponible (Visible)": 177,
+        "No Disponible (Vendido)": 18,
+        "Disponible (Oculto)": 5
+      }
+    },
+    "Napoles": {
+      "unidades": 270,
+      "precio_promedio": 318010.75,
+      "precio_median": 335212.07,
+      "por_estado": {
+        "Disponible (Visible)": 261,
+        "No Disponible (Vendido)": 9
+      }
+    },
+    "Sialia": {
+      "unidades": 130,
+      "precio_promedio": 446307.36,
+      "precio_median": 447168.38,
+      "por_estado": {
+        "Disponible (Visible)": 90,
+        "No Disponible (Vendido)": 37,
+        "Disponible (Oculto)": 3
+      }
+    },
+    "Tizon_y_Bueno": {
+      "unidades": 114,
+      "precio_promedio": 477398.86,
+      "precio_median": 475164.67,
+      "por_estado": {
+        "No Disponible (Vendido)": 91,
+        "Disponible (Oculto)": 12,
+        "Disponible (Visible)": 11
+      }
+    }
+  },
+  "by_estado": {
+    "Disponible (Visible)": 896,
+    "No Disponible (Vendido)": 268,
+    "Disponible (Oculto)": 56
+  }
+}

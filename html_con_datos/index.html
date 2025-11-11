@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Inteligencia Inmobiliaria – Nexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Tabla: encabezado fijo */
+    .sticky-th th { position: sticky; top: 0; background: white; z-index: 10; }
+    /* Paginación: botones deshabilitados */
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div class="max-w-7xl mx-auto p-6 space-y-6">
+
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl md:text-3xl font-semibold">Inteligencia Inmobiliaria – Nexo</h1>
+      <span id="badge-generated" class="text-sm text-slate-500"></span>
+    </header>
+
+    <!-- KPI Cards -->
+    <section id="kpi-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <div class="text-sm text-slate-500">Unidades totales</div>
+        <div id="kpi-unidades" class="text-3xl font-semibold">–</div>
+      </div>
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <div class="text-sm text-slate-500">Precio promedio</div>
+        <div id="kpi-precio-prom" class="text-3xl font-semibold">–</div>
+      </div>
+      <div class="rounded-2xl shadow-sm bg-white p-5">
+        <div class="text-sm text-slate-500">Precio mediana</div>
+        <div id="kpi-precio-med" class="text-3xl font-semibold">–</div>
+      </div>
+    </section>
+
+    <!-- Controles -->
+    <section class="rounded-2xl shadow-sm bg-white p-5 space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input id="search" type="search" placeholder="Buscar (inmueble, tipología, estado)…"
+               class="md:col-span-2 rounded-xl border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-400" />
+        <select id="filter-proyecto" class="rounded-xl border border-slate-300 px-3 py-2">
+          <option value="">Proyecto: todos</option>
+        </select>
+        <select id="filter-estado" class="rounded-xl border border-slate-300 px-3 py-2">
+          <option value="">Estado: todos</option>
+        </select>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="btn-reset" class="btn rounded-xl px-3 py-2 bg-slate-800 text-white">Limpiar filtros</button>
+        <button id="btn-descargar" class="btn rounded-xl px-3 py-2 border border-slate-300">Descargar CSV</button>
+      </div>
+    </section>
+
+    <!-- Tabla -->
+    <section class="rounded-2xl shadow-sm bg-white p-0 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table id="tabla" class="min-w-full text-sm">
+          <thead class="sticky-th">
+            <tr class="border-b">
+              <!-- headers renderizados por JS -->
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <!-- filas renderizadas por JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Paginación -->
+      <div class="flex items-center justify-between p-4 border-t">
+        <div class="text-sm text-slate-500">
+          <span id="page-info">Página 1</span>
+        </div>
+        <div class="flex gap-2">
+          <button id="prev" class="btn rounded-lg px-3 py-1 border border-slate-300">Anterior</button>
+          <button id="next" class="btn rounded-lg px-3 py-1 border border-slate-300">Siguiente</button>
+          <select id="page-size" class="rounded-lg border border-slate-300 px-2 py-1">
+            <option>10</option>
+            <option selected>25</option>
+            <option>50</option>
+            <option>100</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Breakdown por Estado -->
+    <section class="rounded-2xl shadow-sm bg-white p-5">
+      <h2 class="text-lg font-semibold mb-3">Unidades por estado (global)</h2>
+      <div id="estado-tags" class="flex flex-wrap gap-2">
+        <!-- chips -->
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // ------- Utilidades -------
+    const money = (v) =>
+      (v === null || v === undefined || isNaN(v)) ? "–" :
+      new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN", maximumFractionDigits: 0 }).format(v);
+
+    const csvEscape = (s) => `"${String(s ?? "").replaceAll('"','""')}"`;
+
+    function downloadCSV(rows, headers) {
+      const head = headers.map(csvEscape).join(",");
+      const body = rows.map(r => headers.map(h => csvEscape(r[h])).join(",")).join("\n");
+      const blob = new Blob([head + "\n" + body], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "nexo_unidades.csv"; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ------- Estado global -------
+    let DATA = [];           // registros crudos
+    let VIEW = [];           // registros filtrados / ordenados
+    let HEADERS = [];
+    let sortKey = null;
+    let sortDir = 1;         // 1 asc, -1 desc
+    let page = 1;
+    let pageSize = 25;
+    let proyectos = new Set();
+    let estados = new Set();
+    let KPIS = null;
+
+    // ------- Carga JSON -------
+    async function fetchJSON(file) {
+      const r = await fetch(file);
+      if (!r.ok) throw new Error(`No se pudo cargar ${file}`);
+      return r.json();
+    }
+
+    async function boot() {
+      const [records, kpis] = await Promise.all([
+        fetchJSON("records.json"),
+        fetchJSON("kpis.json"),
+      ]);
+      KPIS = kpis;
+
+      DATA = records.map(r => ({
+        "Proyecto": r["Proyecto"] ?? "",
+        "Numero de inmueble": r["Numero de inmueble"] ?? "",
+        "Precio de lista": r["Precio de lista"] ?? "",
+        "Precio de lista_num": r["Precio de lista_num"] ?? null,
+        "Estado de inmueble": r["Estado de inmueble"] ?? "",
+        "Tipologia": r["Tipologia"] ?? "",
+        "Area techada": r["Area techada"] ?? "",
+        "Area techada_num": r["Area techada_num"] ?? null,
+        "Area total": r["Area total"] ?? "",
+        "Area total_num": r["Area total_num"] ?? null,
+        "Dormitorios": r["Dormitorios"] ?? "",
+        "Dormitorios_num": r["Dormitorios_num"] ?? null,
+        "Piso": r["Piso"] ?? ""
+      }));
+
+      // Cabeceras visibles
+      HEADERS = [
+        "Proyecto", "Numero de inmueble", "Estado de inmueble",
+        "Tipologia", "Dormitorios", "Piso",
+        "Area techada", "Area total",
+        "Precio de lista"
+      ].filter(h => h in DATA[0]);
+
+      // Combos
+      DATA.forEach(r => { if (r["Proyecto"]) proyectos.add(r["Proyecto"]); if (r["Estado de inmueble"]) estados.add(r["Estado de inmueble"]); });
+
+      // KPIs
+      document.querySelector("#kpi-unidades").textContent = (kpis?.cards?.unidades_totales ?? DATA.length).toLocaleString("es-PE");
+      document.querySelector("#kpi-precio-prom").textContent = money(kpis?.cards?.precio_promedio ?? null);
+      document.querySelector("#kpi-precio-med").textContent = money(kpis?.cards?.precio_median ?? null);
+      document.querySelector("#badge-generated").textContent = kpis?.generated_at ? `Generado: ${kpis.generated_at}` : "";
+
+      // Chips estado
+      const etg = document.querySelector("#estado-tags");
+      etg.innerHTML = "";
+      const byEstado = kpis?.by_estado ?? {};
+      Object.keys(byEstado).forEach(k=>{
+        const v = byEstado[k];
+        const div = document.createElement("div");
+        div.className = "px-3 py-1 rounded-full bg-slate-100 border text-slate-700";
+        div.textContent = `${k}: ${v.toLocaleString("es-PE")}`;
+        etg.appendChild(div);
+      });
+
+      // Filtros
+      const selP = document.querySelector("#filter-proyecto");
+      const selE = document.querySelector("#filter-estado");
+      [...proyectos].sort().forEach(p=>{
+        const opt = document.createElement("option");
+        opt.value = p; opt.textContent = p; selP.appendChild(opt);
+      });
+      [...estados].sort().forEach(e=>{
+        const opt = document.createElement("option");
+        opt.value = e; opt.textContent = e; selE.appendChild(opt);
+      });
+
+      // Render
+      attachHandlers();
+      applyFiltersAndRender();
+    }
+
+    // ------- Filtros + búsqueda -------
+    function applyFiltersAndRender() {
+      const q = document.querySelector("#search").value.trim().toLowerCase();
+      const fP = document.querySelector("#filter-proyecto").value;
+      const fE = document.querySelector("#filter-estado").value;
+
+      VIEW = DATA.filter(r => {
+        const okP = !fP || r["Proyecto"] === fP;
+        const okE = !fE || r["Estado de inmueble"] === fE;
+        const hayQ = !q || Object.values(r).some(v => String(v ?? "").toLowerCase().includes(q));
+        return okP && okE && hayQ;
+      });
+
+      // Orden
+      if (sortKey) {
+        VIEW.sort((a,b)=>{
+          const va = a[sortKey], vb = b[sortKey];
+          // Numérico preferente para precio y áreas
+          const isNum = ["Precio de lista_num", "Area techada_num", "Area total_num", "Dormitorios_num"].some(k => k===sortKey) ||
+                        ["Precio de lista","Area techada","Area total","Dormitorios"].includes(sortKey);
+          if (isNum) {
+            const na = Number(a[sortKey] ?? a[sortKey+"_num"] ?? a[sortKey]) || 0;
+            const nb = Number(b[sortKey] ?? b[sortKey+"_num"] ?? b[sortKey]) || 0;
+            return (na - nb) * sortDir;
+          }
+          return String(va ?? "").localeCompare(String(vb ?? ""), "es", { numeric: true }) * sortDir;
+        });
+      }
+
+      page = 1; // reset
+      renderTable();
+    }
+
+    // ------- Tabla -------
+    function renderHeaders() {
+      const tr = document.querySelector("thead tr");
+      tr.innerHTML = "";
+      HEADERS.forEach(h=>{
+        const th = document.createElement("th");
+        th.className = "text-left px-4 py-3 font-medium border-b cursor-pointer select-none";
+        th.textContent = h;
+        th.title = "Ordenar por " + h;
+        th.addEventListener("click", ()=>{
+          if (sortKey === h) { sortDir = -sortDir; } else { sortKey = h; sortDir = 1; }
+          applyFiltersAndRender();
+        });
+        tr.appendChild(th);
+      });
+    }
+
+    function renderTable() {
+      renderHeaders();
+      const tbody = document.querySelector("#tbody");
+      tbody.innerHTML = "";
+
+      const start = (page-1)*pageSize;
+      const end = start + pageSize;
+      const rows = VIEW.slice(start, end);
+
+      for (const r of rows) {
+        const tr = document.createElement("tr");
+        tr.className = "border-b hover:bg-slate-50";
+        for (const h of HEADERS) {
+          let val = r[h];
+          if (h === "Precio de lista") val = money(r["Precio de lista_num"]);
+          const td = document.createElement("td");
+          td.className = "px-4 py-2";
+          td.textContent = (val ?? "") === "" ? "–" : val;
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+
+      const info = document.querySelector("#page-info");
+      info.textContent = `Página ${page} • ${Math.min(end, VIEW.length)} de ${VIEW.length} filas`;
+
+      document.querySelector("#prev").disabled = page <= 1;
+      document.querySelector("#next").disabled = end >= VIEW.length;
+    }
+
+    // ------- Eventos -------
+    function attachHandlers() {
+      document.querySelector("#search").addEventListener("input", debounce(applyFiltersAndRender, 200));
+      document.querySelector("#filter-proyecto").addEventListener("change", applyFiltersAndRender);
+      document.querySelector("#filter-estado").addEventListener("change", applyFiltersAndRender);
+      document.querySelector("#btn-reset").addEventListener("click", ()=>{
+        document.querySelector("#search").value = "";
+        document.querySelector("#filter-proyecto").value = "";
+        document.querySelector("#filter-estado").value = "";
+        sortKey = null; sortDir = 1; page = 1;
+        applyFiltersAndRender();
+      });
+      document.querySelector("#prev").addEventListener("click", ()=>{ if (page>1){ page--; renderTable(); }});
+      document.querySelector("#next").addEventListener("click", ()=>{ if ((page*pageSize)<VIEW.length){ page++; renderTable(); }});
+      document.querySelector("#page-size").addEventListener("change", (e)=>{
+        pageSize = parseInt(e.target.value,10)||25; page=1; renderTable();
+      });
+      document.querySelector("#btn-descargar").addEventListener("click", ()=>{
+        const headers = HEADERS;
+        const data = VIEW.map(r=>{
+          const obj = {};
+          headers.forEach(h=>{
+            obj[h] = (h==="Precio de lista") ? (r["Precio de lista_num"] ?? "") : (r[h] ?? "");
+          });
+          return obj;
+        });
+        downloadCSV(data, headers);
+      });
+    }
+
+    function debounce(fn, t=250) {
+      let id; return (...args)=>{ clearTimeout(id); id=setTimeout(()=>fn(...args), t); };
+    }
+
+    // Go!
+    boot().catch(err=>{
+      console.error(err);
+      alert("Error cargando datos: " + err.message);
+    });
+  </script>
+</body>
+</html>
